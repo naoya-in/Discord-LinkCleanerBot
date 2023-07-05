@@ -18,6 +18,8 @@ import {
   amazonUrlRegex,
   fetchAmazonData,
   shortenUrl,
+  twitterUrlRegex, // 追加: TwitterのURLにマッチする正規表現
+  shortenTwitterUrl, // 追加: TwitterのURLを短縮する関数
 } from "./amazon.ts";
 
 const webhookName = "Amazon-URL-Shortener";
@@ -79,64 +81,76 @@ if (import.meta.main) {
       },
 
       async messageCreate(message) {
-        if (!message.content.match(amazonUrlRegex)) return;
+        if (message.content.match(amazonUrlRegex)) {
+          // AmazonのURLが含まれている場合の処理...
 
-        let webhook, thread;
-        try {
-          webhook = await ensureWebhook(message.channelId);
-        } catch {
+          let webhook, thread;
           try {
-            // when message is sent to thread
-            thread = cache.threads.get(message.channelId) ??
-              await getChannel(message.channelId);
-            webhook = await ensureWebhook(thread.parentId as bigint);
-          } catch (error) {
-            console.error(error);
+            webhook = await ensureWebhook(message.channelId);
+          } catch {
+            try {
+              thread = cache.threads.get(message.channelId) ??
+                await getChannel(message.channelId);
+              webhook = await ensureWebhook(thread.parentId as bigint);
+            } catch (error) {
+              console.error(error);
+              return;
+            }
+          }
+
+          if (message.embeds.length > 0 && message.webhookId) {
+            const updatedEmbeds = await updateEmbeds(message.embeds);
+            const webhook = await getWebhook(message.webhookId);
+            editWebhookMessage(
+              BigInt(webhook.id),
+              webhook.token as string,
+              {
+                messageId: message.id,
+                embeds: updatedEmbeds,
+              },
+            ).catch(console.error);
             return;
           }
-        }
 
-        if (message.embeds.length > 0 && message.webhookId) {
-          const updatedEmbeds = await updateEmbeds(message.embeds);
-          const webhook = await getWebhook(message.webhookId);
-          // if (JSON.stringify(updatedEmbeds) === JSON.stringify(message.embeds)) return;
-          editWebhookMessage(
-            BigInt(webhook.id),
-            webhook.token as string,
-            {
-              messageId: message.id,
-              embeds: updatedEmbeds,
-            },
-          ).catch(console.error);
-          return;
-        }
+          if (!message.webhookId) {
+            const { username, discriminator, id, avatar } =
+              message.toJSON().author;
+            sendWebhook(BigInt(webhook.id), webhook.token as string, {
+              threadId: thread?.id,
+              content: shortenUrl(message.content),
+              username: `${username}#${discriminator}`,
+              avatarUrl: `https://cdn.discordapp.com/avatars/${id}/${avatar}.png`,
+            })
+              .then(() => message.delete("Shortening Amazon URL"))
+              .catch((error) => console.log(error));
+          }
+        } else if (message.content.match(twitterUrlRegex)) {
+          // TwitterのURLが含まれている場合の処理...
 
-        // オリジナルメッセージを削除し，短縮リンクに置き換えて投稿する
-        if (!message.webhookId) {
           const { username, discriminator, id, avatar } =
             message.toJSON().author;
+
           sendWebhook(BigInt(webhook.id), webhook.token as string, {
             threadId: thread?.id,
-            content: shortenUrl(message.content),
+            content: shortenTwitterUrl(message.content),
             username: `${username}#${discriminator}`,
             avatarUrl: `https://cdn.discordapp.com/avatars/${id}/${avatar}.png`,
           })
-            .then(() => message.delete("Shortening Amazon URL"))
+            .then(() => message.delete("Shortening Twitter URL"))
             .catch((error) => console.log(error));
         }
       },
 
       async raw(data) {
-        // embed が追加されたらそこに情報を足す
-        // 最初からユーザーが送ったメッセージに embed が追加されていることもある
+        // Embedが追加されたらそこに情報を足す
+        // 最初からユーザーが送ったメッセージにEmbedが追加されていることもある
         if (data.t === "MESSAGE_UPDATE") {
           data = camelize(data);
 
-          // discord が追加した embed は編集日時が存在しない
+          // Discordが追加したEmbedは編集日時が存在しない
           const partialMessage = data.d as Message;
           if (partialMessage.editedTimestamp) return;
 
-          // すでに messageCreate で削除済みのメッセージに関するイベントが発生した場合に対応
           let message: DiscordenoMessage;
           try {
             message = await getMessage(
@@ -152,7 +166,6 @@ if (import.meta.main) {
 
           const updatedEmbeds = await updateEmbeds(message.embeds);
           const webhook = await getWebhook(message.webhookId);
-          // if (JSON.stringify(updatedEmbeds) === JSON.stringify(message.embeds)) return;
           editWebhookMessage(
             BigInt(webhook.id),
             webhook.token as string,

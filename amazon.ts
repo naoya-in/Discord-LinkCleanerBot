@@ -49,3 +49,16 @@ export function shortenUrl(url: string) {
       `https://www.amazon.co.jp/gp/${kind ?? "product"}/${id}/`,
   );
 }
+
+// Twitterリンクの正規表現
+export const twitterUrlRegex = new RegExp(
+  "https://twitter.com/([a-zA-Z0-9_]{1,15})/status/([0-9]+)",
+  "g",
+);
+
+export function shortenTwitterUrl(url: string) {
+  return url.replaceAll(
+    twitterUrlRegex,
+    (_0, user, status) => `https://vxtwitter.com/${user}/status/${status}`,
+  );
+}
